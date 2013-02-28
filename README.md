@@ -1,14 +1,14 @@
 Bioformats Image MyTardis Filter
 ===============================
 
-_dm3 files only supported for now_
+_dm3 files only supported for now. However, Bioformats supports [many formats](http://loci.wisc.edu/bio-formats/formats) so potentially so will this filter without much effort._
 
 Filter for generating image thumbnails and storing metadata for MyTardis using LOCI Bioformats' command line binaries that interact with their jar file.
 
 ![Screenshot](https://dl.dropbox.com/u/172498/screenshots_host/bioformats-dm3.png)
 
 ## Todo
- - Support more files than just dm3 (should be easy)
+ - Support more files than just dm3
  - Error handling if the dm3 file fails for whatever reason
  - More detailed metadata parameters than simple text output
 
@@ -42,7 +42,7 @@ Then add the definition for this filter.
 
 ```
 POST_SAVE_FILTERS = [
-   ("tardis.tardis_portal.filters.bioformatsimage.make_filter",
+   ("tardis.tardis_portal.filters.bioformatsimage.bioformatsimage.make_filter",
    ["BIOFORMATS", "http://tardis.edu.au/schemas/bioformats/1",
     "/path/to/bftools/bfconvert",
      "/path/to/bftools/showinf"]),
