@@ -44,7 +44,17 @@ Then add the definition for this filter.
 POST_SAVE_FILTERS = [
    ("tardis.tardis_portal.filters.bioformatsimage.make_filter",
    ["BIOFORMATS", "http://tardis.edu.au/schemas/bioformats/1",
-    "/opt/mytardis/current/var/bftools/bfconvert",
-     "/opt/mytardis/current/var/bftools/showinf"]),
+    "/path/to/bftools/bfconvert",
+     "/path/to/bftools/showinf"]),
    ]
 ```
+
+Where the bftools directory is correct for your installation.
+
+`cd /path/to/mytardis` and load the parameter schema into the MyTardis database:
+
+```
+bin/django loaddata tardis/tardis_portal/filters/bioformatsimage/bioformats.json
+```
+
+Restart MyTardis. From now on, all dm3 files loaded will have preview images and metadata extracted and stored alongside the file itself.
