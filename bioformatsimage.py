@@ -38,6 +38,8 @@ bioformatsimage.py
 from fractions import Fraction
 import logging
 
+from django.conf import settings
+
 from tardis.tardis_portal.models import Schema, DatafileParameterSet
 from tardis.tardis_portal.models import ParameterName, DatafileParameter
 import subprocess
@@ -96,32 +98,32 @@ class BioformatsImageFilter(object):
 
             outputextension = "png"
 
-            tf = tempfile.NamedTemporaryFile(suffix='.%s' % outputextension, delete=False)
+            preview_image_rel_file_path = os.path.join(
+                str(instance.dataset.get_first_experiment().id),
+                str(instance.dataset.id),
+                str(instance.id),
+                '%s.%s' % (os.path.basename(filepath),
+                           outputextension))
+            preview_image_file_path = os.path.join(
+                settings.METADATA_STORE_PATH, preview_image_rel_file_path)
 
-            outputfilename = tf.name
+            os.makedirs(os.path.dirname(preview_image_file_path))
 
             bin_imagepath = os.path.basename(self.image_path)
             cd_imagepath = os.path.dirname(self.image_path)
             self.fileoutput(cd_imagepath,
                             bin_imagepath,
                             filepath,
-                            outputfilename,
+                            preview_image_file_path,
                             '-overwrite')
 
-            tf.close()
-
-            previewImage64 = self.base64_encode_file(tf.name)
-
-            os.remove(outputfilename)
-
             metadata_dump = dict()
-            if previewImage64:
-                metadata_dump['previewImage'] = previewImage64
+            metadata_dump['previewImage'] = preview_image_rel_file_path
 
             bin_infopath = os.path.basename(self.metadata_path)
             cd_infopath = os.path.dirname(self.metadata_path)
-            image_information = self.textoutput(cd_infopath, bin_infopath,
-                                                filepath, '-nopix').split('\n')[11:]
+            image_information = self.textoutput(
+                cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
 
             print 'NEW NEW NEW !~~~~~~~~'
             print image_information
@@ -271,7 +273,8 @@ class BioformatsImageFilter(object):
 
         return result_str
 
-    def fileoutput(self, cd, execfilename, inputfilename, outputfilename, args=""):
+    def fileoutput(self,
+                   cd, execfilename, inputfilename, outputfilename, args=""):
         """execute command on shell with a file output
         """
         cmd = "cd '%s'; ./'%s' '%s' '%s' %s" %\
@@ -298,4 +301,5 @@ def make_filter(name='', schema='', tagsToFind=[], tagsToExclude=[]):
         raise ValueError("BioformatsImageFilter "
                          "requires a schema to be specified")
     return BioformatsImageFilter(name, schema, tagsToFind, tagsToExclude)
+
 make_filter.__doc__ = BioformatsImageFilter.__doc__
