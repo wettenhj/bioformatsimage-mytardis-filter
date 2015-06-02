@@ -33,6 +33,7 @@
 bioformatsimage.py
 
 .. moduleauthor:: Steve Androulakis <steve.androulakis@gmail.com>
+.. moduleauthor:: James Wettenhall <james.wettenhall@monash.edu>
 
 """
 from fractions import Fraction
@@ -42,10 +43,14 @@ from django.conf import settings
 
 from tardis.tardis_portal.models import Schema, DatafileParameterSet
 from tardis.tardis_portal.models import ParameterName, DatafileParameter
+from tardis.tardis_portal.models import DataFileObject
 import subprocess
 import tempfile
 import base64
 import os
+import shutil
+import traceback
+import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -87,61 +92,96 @@ class BioformatsImageFilter(object):
         """
         instance = kwargs.get('instance')
 
-        schema = self.getSchema()
-
-        filepath = instance.get_absolute_filepath()
-
-        if not filepath.endswith('.dm3'):
+        extension = instance.filename.lower()[-3:]
+        if extension not in ('.dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
             return None
 
+        print "Applying Bioformats filter to '%s'..." % instance.filename
+
+        schema = self.getSchema()
+
+        tmpdir = tempfile.mkdtemp()
+
+        filepath = os.path.join(tmpdir, instance.filename)
+        logger.info("filepath = '" + filepath + "'")
+
+        with instance.file_object as f:
+            with open(filepath, 'wb') as g:
+                while True:
+                    chunk = f.read(1024)
+                    if not chunk:
+                        break
+                    g.write(chunk)
+
         try:
-
             outputextension = "png"
-
+            dfos = DataFileObject.objects.filter(datafile=instance)
             preview_image_rel_file_path = os.path.join(
-                str(instance.dataset.get_first_experiment().id),
-                str(instance.dataset.id),
+                os.path.dirname(urlparse.urlparse(dfos[0].uri).path),
                 str(instance.id),
                 '%s.%s' % (os.path.basename(filepath),
                            outputextension))
+            logger.info("preview_image_rel_file_path = " +
+                        preview_image_rel_file_path)
             preview_image_file_path = os.path.join(
                 settings.METADATA_STORE_PATH, preview_image_rel_file_path)
+            logger.info("preview_image_file_path = " + preview_image_file_path)
 
-            os.makedirs(os.path.dirname(preview_image_file_path))
+            if not os.path.exists(os.path.dirname(preview_image_file_path)):
+                os.makedirs(os.path.dirname(preview_image_file_path))
 
             bin_imagepath = os.path.basename(self.image_path)
+            logger.info("bin_imagepath = " + bin_imagepath)
             cd_imagepath = os.path.dirname(self.image_path)
+            logger.info("cd_imagepath = " + cd_imagepath)
+
             self.fileoutput(cd_imagepath,
                             bin_imagepath,
                             filepath,
                             preview_image_file_path,
                             '-overwrite')
 
+            self.fileoutput('/bin',
+                            'mv',
+                            preview_image_file_path,
+                            preview_image_file_path + '.bioformats'
+                           )
+
+            self.fileoutput2('/usr/bin',
+                            'convert',
+                            preview_image_file_path + '.bioformats',
+                            '-contrast-stretch 0',
+                            preview_image_file_path
+                           )
+
             metadata_dump = dict()
             metadata_dump['previewImage'] = preview_image_rel_file_path
 
-            bin_infopath = os.path.basename(self.metadata_path)
-            cd_infopath = os.path.dirname(self.metadata_path)
-            image_information = self.textoutput(
-                cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
+            if filepath.endswith('.dm3'):
+                bin_infopath = os.path.basename(self.metadata_path)
+                cd_infopath = os.path.dirname(self.metadata_path)
+                image_information = self.textoutput(
+                    cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
 
-            print 'NEW NEW NEW !~~~~~~~~'
-            print image_information
-            # first 11 lines are useless in output
+                if image_information:
+                    metadata_dump['image_information'] = image_information
 
-            if image_information:
-                metadata_dump['image_information'] = image_information
+            shutil.rmtree(tmpdir)
 
             self.saveMetadata(instance, schema, metadata_dump)
 
         except Exception, e:
-            logger.debug(e)
+            print str(e)
+            print traceback.format_exc()
+            logger.debug(str(e))
             return None
 
     def saveMetadata(self, instance, schema, metadata):
         """Save all the metadata to a Dataset_Files paramamter set.
         """
         parameters = self.getParameters(schema, metadata)
+
+        # Some/all? of these excludes below are specific to DM3 format:
 
         exclude_line = dict()
         exclude_line['-----'] = None
@@ -155,15 +195,17 @@ class BioformatsImageFilter(object):
         exclude_line['Checking file format [Gatan Digital Micrograph]'] = None
 
         if not parameters:
+            print "Bailing out of saveMetadata because of 'not parameters'."
             return None
 
         try:
             ps = DatafileParameterSet.objects.get(schema=schema,
-                                                  dataset_file=instance)
+                                                  datafile=instance)
+            print "Parameter set already exists for %s, so we'll just return it." % instance.filename
             return ps  # if already exists then just return it
         except DatafileParameterSet.DoesNotExist:
             ps = DatafileParameterSet(schema=schema,
-                                      dataset_file=instance)
+                                      datafile=instance)
             ps.save()
 
         for p in parameters:
@@ -280,6 +322,18 @@ class BioformatsImageFilter(object):
         cmd = "cd '%s'; ./'%s' '%s' '%s' %s" %\
             (cd, execfilename, inputfilename, outputfilename, args)
         print cmd
+        logger.info(cmd)
+
+        return self.exec_command(cmd)
+
+    def fileoutput2(self,
+                   cd, execfilename, inputfilename, args1, outputfilename, args2=""):
+        """execute command on shell with a file output
+        """
+        cmd = "cd '%s'; ./'%s' '%s' %s '%s' %s" %\
+            (cd, execfilename, inputfilename, args1, outputfilename, args2)
+        print cmd
+        logger.info(cmd)
 
         return self.exec_command(cmd)
 
@@ -289,6 +343,7 @@ class BioformatsImageFilter(object):
         cmd = "cd '%s'; ./'%s' '%s' %s" %\
             (cd, execfilename, inputfilename, args)
         print cmd
+        logger.info(cmd)
 
         return self.exec_command(cmd)
 
