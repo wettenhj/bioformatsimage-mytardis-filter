@@ -93,7 +93,7 @@ class BioformatsImageFilter(object):
         instance = kwargs.get('instance')
 
         extension = instance.filename.lower()[-3:]
-        if extension not in ('.dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
+        if extension not in ('dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
             return None
 
         print "Applying Bioformats filter to '%s'..." % instance.filename
