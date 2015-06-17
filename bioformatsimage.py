@@ -157,14 +157,13 @@ class BioformatsImageFilter(object):
             metadata_dump = dict()
             metadata_dump['previewImage'] = preview_image_rel_file_path
 
-            if filepath.endswith('.dm3'):
-                bin_infopath = os.path.basename(self.metadata_path)
-                cd_infopath = os.path.dirname(self.metadata_path)
-                image_information = self.textoutput(
-                    cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
+            bin_infopath = os.path.basename(self.metadata_path)
+            cd_infopath = os.path.dirname(self.metadata_path)
+            image_information = self.textoutput(
+                cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
 
-                if image_information:
-                    metadata_dump['image_information'] = image_information
+            if image_information:
+                metadata_dump['image_information'] = image_information
 
             shutil.rmtree(tmpdir)
 
