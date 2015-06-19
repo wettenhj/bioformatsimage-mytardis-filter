@@ -91,14 +91,21 @@ class BioformatsImageFilter(object):
         :type created: bool
         """
         instance = kwargs.get('instance')
+        schema = self.getSchema()
 
         extension = instance.filename.lower()[-3:]
         if extension not in ('dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
             return None
 
-        print "Applying Bioformats filter to '%s'..." % instance.filename
+        if DatafileParameterSet.objects.filter(schema=schema,
+                                               datafile=instance).exists():
+            ps = DatafileParameterSet.objects.get(schema=schema,
+                                                  datafile=instance)
+            print "Parameter set already exists for %s, " \
+                "so we'll just return it." % instance.filename
+            return ps
 
-        schema = self.getSchema()
+        print "Applying Bioformats filter to '%s'..." % instance.filename
 
         tmpdir = tempfile.mkdtemp()
 
@@ -144,15 +151,13 @@ class BioformatsImageFilter(object):
             self.fileoutput('/bin',
                             'mv',
                             preview_image_file_path,
-                            preview_image_file_path + '.bioformats'
-                           )
+                            preview_image_file_path + '.bioformats')
 
             self.fileoutput2('/usr/bin',
-                            'convert',
-                            preview_image_file_path + '.bioformats',
-                            '-contrast-stretch 0',
-                            preview_image_file_path
-                           )
+                             'convert',
+                             preview_image_file_path + '.bioformats',
+                             '-contrast-stretch 0',
+                             preview_image_file_path)
 
             metadata_dump = dict()
             metadata_dump['previewImage'] = preview_image_rel_file_path
@@ -200,8 +205,9 @@ class BioformatsImageFilter(object):
         try:
             ps = DatafileParameterSet.objects.get(schema=schema,
                                                   datafile=instance)
-            print "Parameter set already exists for %s, so we'll just return it." % instance.filename
-            return ps  # if already exists then just return it
+            print "Parameter set already exists for %s, " \
+                "so we'll just return it." % instance.filename
+            return ps
         except DatafileParameterSet.DoesNotExist:
             ps = DatafileParameterSet(schema=schema,
                                       datafile=instance)
@@ -222,7 +228,7 @@ class BioformatsImageFilter(object):
                         for val in reversed(metadata[p.name]):
                             strip_val = val.strip()
                             if strip_val:
-                                if not strip_val in exclude_line:
+                                if strip_val not in exclude_line:
                                     dfp = DatafileParameter(parameterset=ps,
                                                             name=p)
                                     dfp.string_value = strip_val
@@ -240,7 +246,7 @@ class BioformatsImageFilter(object):
         parameters = []
         for p in metadata:
 
-            if self.tagsToFind and not p in self.tagsToFind:
+            if self.tagsToFind and p not in self.tagsToFind:
                 continue
 
             if p in self.tagsToExclude:
@@ -325,8 +331,8 @@ class BioformatsImageFilter(object):
 
         return self.exec_command(cmd)
 
-    def fileoutput2(self,
-                   cd, execfilename, inputfilename, args1, outputfilename, args2=""):
+    def fileoutput2(self, cd, execfilename, inputfilename, args1,
+                    outputfilename, args2=""):
         """execute command on shell with a file output
         """
         cmd = "cd '%s'; ./'%s' '%s' %s '%s' %s" %\
