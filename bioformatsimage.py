@@ -167,6 +167,8 @@ class BioformatsImageFilter(object):
                              '-contrast-stretch 0',
                              preview_image_file_path)
 
+            os.unlink(preview_image_file_path + '.bioformats')
+
             metadata_dump = dict()
             metadata_dump['previewImage'] = preview_image_rel_file_path
 
