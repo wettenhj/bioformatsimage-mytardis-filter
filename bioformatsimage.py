@@ -108,14 +108,6 @@ class BioformatsImageFilter(object):
                 "so we'll just return it." % instance.filename
             return ps
 
-        one_gigabyte = 1024 * 1024 * 1024
-        if instance.file_object.size > one_gigabyte:
-            logger.warning("Refusing to run Bioformats on %s (ID %d), "
-                           "because its size (%d) is larger than 1 GB."
-                           % (instance.filename, instance.id,
-                              instance.file_object.size))
-            return None
-
         print "Applying Bioformats filter to '%s'..." % instance.filename
 
         # Instead of checking out to a tmpdir, we'll use dfo.get_full_path().
