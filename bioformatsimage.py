@@ -97,6 +97,8 @@ class BioformatsImageFilter(object):
         if extension not in ('dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
             return None
 
+        generate_preview_image = extension not in ('lif', 'tif')
+
         if DatafileParameterSet.objects.filter(schema=schema,
                                                datafile=instance).exists():
             ps = DatafileParameterSet.objects.get(schema=schema,
@@ -115,62 +117,15 @@ class BioformatsImageFilter(object):
 
         print "Applying Bioformats filter to '%s'..." % instance.filename
 
-        tmpdir = tempfile.mkdtemp()
-
-        filepath = os.path.join(tmpdir, instance.filename)
+        # Instead of checking out to a tmpdir, we'll use dfo.get_full_path().
+        # This won't work for object storage, but that's OK for now...
+        dfo = DataFileObject.objects.filter(datafile=instance,
+                                            verified=True).first()
+        filepath = dfo.get_full_path()
         logger.info("filepath = '" + filepath + "'")
 
-        with instance.file_object as f:
-            with open(filepath, 'wb') as g:
-                while True:
-                    chunk = f.read(1024)
-                    if not chunk:
-                        break
-                    g.write(chunk)
-
         try:
-            outputextension = "png"
-            dfos = DataFileObject.objects.filter(datafile=instance)
-            preview_image_rel_file_path = os.path.join(
-                os.path.dirname(urlparse.urlparse(dfos[0].uri).path),
-                str(instance.id),
-                '%s.%s' % (os.path.basename(filepath),
-                           outputextension))
-            logger.info("preview_image_rel_file_path = " +
-                        preview_image_rel_file_path)
-            preview_image_file_path = os.path.join(
-                settings.METADATA_STORE_PATH, preview_image_rel_file_path)
-            logger.info("preview_image_file_path = " + preview_image_file_path)
-
-            if not os.path.exists(os.path.dirname(preview_image_file_path)):
-                os.makedirs(os.path.dirname(preview_image_file_path))
-
-            bin_imagepath = os.path.basename(self.image_path)
-            logger.info("bin_imagepath = " + bin_imagepath)
-            cd_imagepath = os.path.dirname(self.image_path)
-            logger.info("cd_imagepath = " + cd_imagepath)
-
-            self.fileoutput(cd_imagepath,
-                            bin_imagepath,
-                            filepath,
-                            preview_image_file_path,
-                            '-overwrite')
-
-            self.fileoutput('/bin',
-                            'mv',
-                            preview_image_file_path,
-                            preview_image_file_path + '.bioformats')
-
-            self.fileoutput2('/usr/bin',
-                             'convert',
-                             preview_image_file_path + '.bioformats',
-                             '-contrast-stretch 0',
-                             preview_image_file_path)
-
-            os.unlink(preview_image_file_path + '.bioformats')
-
-            metadata_dump = dict()
-            metadata_dump['previewImage'] = preview_image_rel_file_path
+            metadata_dict = dict()
 
             bin_infopath = os.path.basename(self.metadata_path)
             cd_infopath = os.path.dirname(self.metadata_path)
@@ -178,11 +133,54 @@ class BioformatsImageFilter(object):
                 cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
 
             if image_information:
-                metadata_dump['image_information'] = image_information
+                metadata_dict['image_information'] = image_information
 
-            shutil.rmtree(tmpdir)
+            if generate_preview_image:
+                outputextension = "png"
+                dfos = DataFileObject.objects.filter(datafile=instance)
+                preview_image_rel_file_path = os.path.join(
+                    os.path.dirname(urlparse.urlparse(dfos[0].uri).path),
+                    str(instance.id),
+                    '%s.%s' % (os.path.basename(filepath),
+                               outputextension))
+                logger.info("preview_image_rel_file_path = " +
+                            preview_image_rel_file_path)
+                preview_image_file_path = os.path.join(
+                    settings.METADATA_STORE_PATH, preview_image_rel_file_path)
+                logger.info("preview_image_file_path = " +
+                            preview_image_file_path)
 
-            self.saveMetadata(instance, schema, metadata_dump)
+                if not os.path.exists(
+                        os.path.dirname(preview_image_file_path)):
+                    os.makedirs(os.path.dirname(preview_image_file_path))
+
+                bin_imagepath = os.path.basename(self.image_path)
+                logger.info("bin_imagepath = " + bin_imagepath)
+                cd_imagepath = os.path.dirname(self.image_path)
+                logger.info("cd_imagepath = " + cd_imagepath)
+
+                self.fileoutput(cd_imagepath,
+                                bin_imagepath,
+                                filepath,
+                                preview_image_file_path,
+                                '-overwrite')
+
+                self.fileoutput('/bin',
+                                'mv',
+                                preview_image_file_path,
+                                preview_image_file_path + '.bioformats')
+
+                self.fileoutput2('/usr/bin',
+                                 'convert',
+                                 preview_image_file_path + '.bioformats',
+                                 '-contrast-stretch 0',
+                                 preview_image_file_path)
+
+                os.unlink(preview_image_file_path + '.bioformats')
+
+                metadata_dict['previewImage'] = preview_image_rel_file_path
+
+            self.saveMetadata(instance, schema, metadata_dict)
 
         except Exception, e:
             print str(e)
