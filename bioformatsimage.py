@@ -159,6 +159,9 @@ class BioformatsImageFilter(object):
                 cd_imagepath = os.path.dirname(self.image_path)
                 logger.info("cd_imagepath = " + cd_imagepath)
 
+                # Additional options which can be used with bfconvert
+                # to extract only the first image from the stack:
+                # -series 0 -timepoint 0 -channel 0 -z 0
                 self.fileoutput(cd_imagepath,
                                 bin_imagepath,
                                 filepath,
