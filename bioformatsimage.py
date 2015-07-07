@@ -73,14 +73,14 @@ class BioformatsImageFilter(object):
     :param tagsToExclude: a list of the tags to exclude.
     :type tagsToExclude: list of strings
     """
-    def __init__(self, name, schema, image_path, metadata_path,
+    def __init__(self, name, schema, bfconvert_path, showinf_path,
                  tagsToFind=[], tagsToExclude=[]):
         self.name = name
         self.schema = schema
         self.tagsToFind = tagsToFind
         self.tagsToExclude = tagsToExclude
-        self.image_path = image_path
-        self.metadata_path = metadata_path
+        self.bfconvert_path = bfconvert_path
+        self.showinf_path = showinf_path
 
     def __call__(self, sender, **kwargs):
         """post save callback entry point.
@@ -97,7 +97,8 @@ class BioformatsImageFilter(object):
         if extension not in ('dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
             return None
 
-        generate_preview_image = extension not in ('lif', 'tif')
+        # MyTardis's iiif.py can generate a preview image for these file(s):
+        generate_preview_image = extension not in ('tif')
 
         if DatafileParameterSet.objects.filter(schema=schema,
                                                datafile=instance).exists():
@@ -127,10 +128,8 @@ class BioformatsImageFilter(object):
         try:
             metadata_dict = dict()
 
-            bin_infopath = os.path.basename(self.metadata_path)
-            cd_infopath = os.path.dirname(self.metadata_path)
-            image_information = self.textoutput(
-                cd_infopath, bin_infopath, filepath, '-nopix').split('\n')[11:]
+            image_information = self.showinf(
+                self.showinf_path, filepath).split('\n')[11:]
 
             if image_information:
                 metadata_dict['image_information'] = image_information
@@ -154,30 +153,19 @@ class BioformatsImageFilter(object):
                         os.path.dirname(preview_image_file_path)):
                     os.makedirs(os.path.dirname(preview_image_file_path))
 
-                bin_imagepath = os.path.basename(self.image_path)
-                logger.info("bin_imagepath = " + bin_imagepath)
-                cd_imagepath = os.path.dirname(self.image_path)
-                logger.info("cd_imagepath = " + cd_imagepath)
-
                 # Additional options which can be used with bfconvert
                 # to extract only the first image from the stack:
                 # -series 0 -timepoint 0 -channel 0 -z 0
-                self.fileoutput(cd_imagepath,
-                                bin_imagepath,
-                                filepath,
-                                preview_image_file_path,
-                                '-overwrite')
+                self.bfconvert(self.bfconvert_path,
+                               filepath,
+                               preview_image_file_path)
 
-                self.fileoutput('/bin',
-                                'mv',
-                                preview_image_file_path,
-                                preview_image_file_path + '.bioformats')
+                os.rename(preview_image_file_path,
+                          preview_image_file_path + '.bioformats')
 
-                self.fileoutput2('/usr/bin',
-                                 'convert',
-                                 preview_image_file_path + '.bioformats',
-                                 '-contrast-stretch 0',
-                                 preview_image_file_path)
+                self.stretch_contrast('/usr/bin/convert',
+                                      preview_image_file_path + '.bioformats',
+                                      preview_image_file_path)
 
                 os.unlink(preview_image_file_path + '.bioformats')
 
@@ -317,11 +305,11 @@ class BioformatsImageFilter(object):
             encoded = base64.b64encode(read)
             return encoded
 
-    def exec_command(self, cmd):
+    def exec_command(self, cmdline):
         """execute command on shell
         """
         p = subprocess.Popen(
-            cmd,
+            cmdline,
             stdout=subprocess.PIPE,
             shell=True)
 
@@ -331,37 +319,38 @@ class BioformatsImageFilter(object):
 
         return result_str
 
-    def fileoutput(self,
-                   cd, execfilename, inputfilename, outputfilename, args=""):
-        """execute command on shell with a file output
+    def bfconvert(self, bfconvert_path, inputfilename, outputfilename):
         """
-        cmd = "cd '%s'; ./'%s' '%s' '%s' %s" %\
-            (cd, execfilename, inputfilename, outputfilename, args)
-        print cmd
-        logger.info(cmd)
-
-        return self.exec_command(cmd)
-
-    def fileoutput2(self, cd, execfilename, inputfilename, args1,
-                    outputfilename, args2=""):
-        """execute command on shell with a file output
+        Run Bioformats bfconvert on an image file.
         """
-        cmd = "cd '%s'; ./'%s' '%s' %s '%s' %s" %\
-            (cd, execfilename, inputfilename, args1, outputfilename, args2)
-        print cmd
-        logger.info(cmd)
+        cmdline = "'%s' -series 0 -timepoint 0 -channel 0 -z 0 " \
+            "'%s' '%s' -overwrite" %\
+            (bfconvert_path, inputfilename, outputfilename)
+        print cmdline
+        logger.info(cmdline)
 
-        return self.exec_command(cmd)
+        return self.exec_command(cmdline)
 
-    def textoutput(self, cd, execfilename, inputfilename, args=""):
-        """execute command on shell with a stdout output
+    def stretch_contrast(self, convert_path, inputfilename, outputfilename):
         """
-        cmd = "cd '%s'; ./'%s' '%s' %s" %\
-            (cd, execfilename, inputfilename, args)
-        print cmd
-        logger.info(cmd)
+        Run ImageMagick convert with contrast-stretch on an image file.
+        """
+        cmdline = "'%s' '%s' -contrast-stretch 0 '%s'" %\
+            (command, inputfilename, outputfilename)
+        print cmdline
+        logger.info(cmdline)
 
-        return self.exec_command(cmd)
+        return self.exec_command(cmdline)
+
+    def showinf(self, showinf_path, inputfilename):
+        """
+        Run Bioformats showinf to extract metadata.
+        """
+        cmdline = "'%s' '%s' -nopix" % (showinf_path, inputfilename)
+        print cmdline
+        logger.info(cmdline)
+
+        return self.exec_command(cmdline)
 
 
 def make_filter(name='', schema='', tagsToFind=[], tagsToExclude=[]):
