@@ -264,13 +264,23 @@ class BioformatsImageFilter(object):
             return None
 
 
-def make_filter(name='', schema=''):
+def make_filter(name='', schema='',
+                bfconvert_path=None, showinf_path=None,
+                queue=None):
     if not name:
         raise ValueError("BioformatsImageFilter "
                          "requires a name to be specified")
     if not schema:
         raise ValueError("BioformatsImageFilter "
                          "requires a schema to be specified")
-    return BioformatsImageFilter(name, schema)
+    if not bfconvert_path:
+        raise ValueError("BioformatsImageFilter "
+                         "requires a bfconvert path to be specified")
+    if not showinf_path:
+        raise ValueError("BioformatsImageFilter "
+                         "requires a showinf path to be specified")
+    return BioformatsImageFilter(name, schema,
+                                 bfconvert_path, showinf_path,
+                                 queue)
 
 make_filter.__doc__ = BioformatsImageFilter.__doc__
