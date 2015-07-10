@@ -36,7 +36,6 @@ bioformatsimage.py
 .. moduleauthor:: James Wettenhall <james.wettenhall@monash.edu>
 
 """
-from fractions import Fraction
 import logging
 
 from django.conf import settings
@@ -45,13 +44,145 @@ from tardis.tardis_portal.models import Schema, DatafileParameterSet
 from tardis.tardis_portal.models import ParameterName, DatafileParameter
 from tardis.tardis_portal.models import DataFileObject
 import subprocess
-import tempfile
 import os
-import shutil
 import traceback
 import urlparse
+from celery.task import task
 
 logger = logging.getLogger(__name__)
+
+LOCK_EXPIRE = 60 * 5  # Lock expires in 5 minutes
+
+
+@task(name="tardis_portal.filters.bioformatsimage.bfconvert",
+      ignore_result=True)
+def run_bfconvert(bfconvert_path, inputfilename, outputfilename,
+                  df_id, schema_id):
+    """
+    Run Bioformats bfconvert on an image file.
+    """
+    cache = get_cache('celery-locks')
+
+    # Locking functions to ensure only one instance of
+    # bfconvert operates on each datafile at a time.
+    lock_id = 'bioformats-filter-bfconvert-lock-%d' % df_id
+
+    def acquire_lock(): cache.add(lock_id, 'true', LOCK_EXPIRE)
+
+    def release_lock(): cache.delete(lock_id)
+
+    if acquire_lock():
+        try:
+            outputextension = "png"
+            dfo = DataFileObject.objects.filter(datafile__id=df_id,
+                                                verified=True).first()
+            preview_image_rel_file_path = os.path.join(
+                os.path.dirname(urlparse.urlparse(dfo.uri).path),
+                str(df_id),
+                '%s.%s' % (os.path.basename(filepath),
+                           outputextension))
+            preview_image_file_path = os.path.join(
+                settings.METADATA_STORE_PATH, preview_image_rel_file_path)
+
+            if not os.path.exists(
+                    os.path.dirname(preview_image_file_path)):
+                os.makedirs(os.path.dirname(preview_image_file_path))
+
+            # Extract only the first image from the stack:
+            cmdline = "'%s' -series 0 -timepoint 0 -channel 0 -z 0 " \
+                "'%s' '%s' -overwrite" %\
+                (bfconvert_path, inputfilename, outputfilename)
+            logger.info(cmdline)
+            p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, shell=True)
+            p.communicate()
+            os.rename(outputfilename, outputfilename + '.bioformats')
+
+            self.stretch_contrast('/usr/bin/convert',
+                                  preview_image_file_path + '.bioformats',
+                                  preview_image_file_path)
+            # Run ImageMagick convert with contrast-stretch on an image file.
+            # We could probably do this with the Wand Python module instead.
+            cmdline = "convert '%s.bioformats' -contrast-stretch 0 '%s'" %\
+                (command, outputfilename, outputfilename)
+            logger.info(cmdline)
+            p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, shell=True)
+            p.communicate()
+            os.unlink(preview_image_file_path + '.bioformats')
+            try:
+                ps = DatafileParameterSet.objects.get(schema__id=schema_id,
+                                                      datafile__id=df_id)
+            except DatafileParameterSet.DoesNotExist:
+                ps = DatafileParameterSet(schema=schema,
+                                          datafile=instance)
+                ps.save()
+            param_name = ParameterName.objects.get(schema__id=schema_id,
+                                                   name='previewImage')
+            dfp = DatafileParameter(parameterset=ps, name=param_name)
+            dfp.string_value = preview_image_rel_file_path
+            dfp.save()
+        finally:
+            release_lock()
+
+
+@task(name="tardis_portal.filters.bioformatsimage.showinf", ignore_result=True)
+def run_showinf(showinf_path, inputfilename, df_id, schema_id):
+    """
+    Run Bioformats showinf to extract metadata.
+    """
+    cache = get_cache('celery-locks')
+
+    # Locking functions to ensure only one instance of
+    # showinf operates on each datafile at a time.
+    lock_id = 'bioformats-filter-showinf-lock-%d' % df_id
+
+    def acquire_lock(): cache.add(lock_id, 'true', LOCK_EXPIRE)
+
+    def release_lock(): cache.delete(lock_id)
+
+    if acquire_lock():
+        try:
+            cmdline = "'%s' '%s' -nopix" % (showinf_path, inputfilename)
+            logger.info(cmdline)
+            p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, shell=True)
+            image_info = p.communicate()
+            image_info_list = image_info.split('\n')[11:]
+
+            # Some/all? of these excludes below are specific to DM3 format:
+            exclude_line = dict()
+            exclude_line['-----'] = None
+            exclude_line['Reading global metadata'] = None
+            exclude_line['Reading metadata'] = None
+            exclude_line['Reading core metadata'] = None
+            exclude_line['Populating metadata'] = None
+            exclude_line['Reading tags'] = None
+            exclude_line['Verifying Gatan format'] = None
+            exclude_line['Initializing reader'] = None
+            exclude_line['Checking file format [Gatan Digital Micrograph]'] = \
+                None
+
+            try:
+                ps = DatafileParameterSet.objects.get(schema__id=schema_id,
+                                                      datafile__id=df_id)
+            except DatafileParameterSet.DoesNotExist:
+                ps = DatafileParameterSet(schema__id=schema_id,
+                                          datafile__id=df_id)
+                ps.save()
+
+            param_name = ParameterName.objects.get(schema__id=schema_id,
+                                                   name='image_information')
+            for val in reversed(image_info_list):
+                strip_val = val.strip()
+                if strip_val:
+                    if strip_val not in exclude_line:
+                        dfp = DatafileParameter(parameterset=ps,
+                                                name=param_name)
+                        dfp.string_value = strip_val
+                        dfp.save()
+        finally:
+            release_lock()
 
 
 class BioformatsImageFilter(object):
@@ -67,19 +198,16 @@ class BioformatsImageFilter(object):
     :type name: string
     :param schema: the name of the schema to load the EXIF data into.
     :type schema: string
-    :param tagsToFind: a list of the tags to include.
-    :type tagsToFind: list of strings
-    :param tagsToExclude: a list of the tags to exclude.
-    :type tagsToExclude: list of strings
+    :param queue: the name of the celery queue to run tasks in.
+    :type queue: string
     """
     def __init__(self, name, schema, bfconvert_path, showinf_path,
-                 tagsToFind=[], tagsToExclude=[]):
+                 queue=None):
         self.name = name
         self.schema = schema
-        self.tagsToFind = tagsToFind
-        self.tagsToExclude = tagsToExclude
         self.bfconvert_path = bfconvert_path
         self.showinf_path = showinf_path
+        self.queue = queue
 
     def __call__(self, sender, **kwargs):
         """post save callback entry point.
@@ -90,7 +218,7 @@ class BioformatsImageFilter(object):
         :type created: bool
         """
         instance = kwargs.get('instance')
-        schema = self.getSchema()
+        schema = Schema.objects.get(namespace__exact=self.schema)
 
         extension = instance.filename.lower()[-3:]
         if extension not in ('dm3', 'ims', 'jp2', 'lif', 'nd2', 'tif', 'vsi'):
@@ -103,11 +231,12 @@ class BioformatsImageFilter(object):
                                                datafile=instance).exists():
             ps = DatafileParameterSet.objects.get(schema=schema,
                                                   datafile=instance)
-            print "Parameter set already exists for %s, " \
-                "so we'll just return it." % instance.filename
+            logger.warning("Parameter set already exists for %s, "
+                           "so we'll just return it." % instance.filename)
             return ps
 
-        print "Applying Bioformats filter to '%s'..." % instance.filename
+        logger.info("Applying Bioformats filter to '%s'..."
+                    % instance.filename)
 
         # Instead of checking out to a tmpdir, we'll use dfo.get_full_path().
         # This won't work for object storage, but that's OK for now...
@@ -117,232 +246,31 @@ class BioformatsImageFilter(object):
         logger.info("filepath = '" + filepath + "'")
 
         try:
-            metadata_dict = dict()
-
-            image_information = self.showinf(
-                self.showinf_path, filepath).split('\n')[11:]
-
-            if image_information:
-                metadata_dict['image_information'] = image_information
+            kwargs = {'queue': self.queue} if self.queue else {}
+            run_showinf.apply_async(args=[self.showinf_path, filepath,
+                                          instance.id, schema.id],
+                                    **kwargs)
 
             if generate_preview_image:
-                outputextension = "png"
-                dfos = DataFileObject.objects.filter(datafile=instance)
-                preview_image_rel_file_path = os.path.join(
-                    os.path.dirname(urlparse.urlparse(dfos[0].uri).path),
-                    str(instance.id),
-                    '%s.%s' % (os.path.basename(filepath),
-                               outputextension))
-                logger.info("preview_image_rel_file_path = " +
-                            preview_image_rel_file_path)
-                preview_image_file_path = os.path.join(
-                    settings.METADATA_STORE_PATH, preview_image_rel_file_path)
-                logger.info("preview_image_file_path = " +
-                            preview_image_file_path)
-
-                if not os.path.exists(
-                        os.path.dirname(preview_image_file_path)):
-                    os.makedirs(os.path.dirname(preview_image_file_path))
-
-                # Additional options which can be used with bfconvert
-                # to extract only the first image from the stack:
-                # -series 0 -timepoint 0 -channel 0 -z 0
-                self.bfconvert(self.bfconvert_path,
-                               filepath,
-                               preview_image_file_path)
-
-                os.rename(preview_image_file_path,
-                          preview_image_file_path + '.bioformats')
-
-                self.stretch_contrast('/usr/bin/convert',
-                                      preview_image_file_path + '.bioformats',
-                                      preview_image_file_path)
-
-                os.unlink(preview_image_file_path + '.bioformats')
-
-                metadata_dict['previewImage'] = preview_image_rel_file_path
-
-            self.saveMetadata(instance, schema, metadata_dict)
-
+                kwargs = {'queue': self.queue} if self.queue else {}
+                run_bfconvert.apply_async(args=[self.bfconvert_path,
+                                                filepath,
+                                                preview_image_file_path,
+                                                instance.id,
+                                                schema.id],
+                                          **kwargs)
         except Exception, e:
-            print str(e)
-            print traceback.format_exc()
-            logger.debug(str(e))
+            logger.error(traceback.format_exc())
             return None
 
-    def saveMetadata(self, instance, schema, metadata):
-        """Save all the metadata to a Dataset_Files paramamter set.
-        """
-        parameters = self.getParameters(schema, metadata)
 
-        # Some/all? of these excludes below are specific to DM3 format:
-
-        exclude_line = dict()
-        exclude_line['-----'] = None
-        exclude_line['Reading global metadata'] = None
-        exclude_line['Reading metadata'] = None
-        exclude_line['Reading core metadata'] = None
-        exclude_line['Populating metadata'] = None
-        exclude_line['Reading tags'] = None
-        exclude_line['Verifying Gatan format'] = None
-        exclude_line['Initializing reader'] = None
-        exclude_line['Checking file format [Gatan Digital Micrograph]'] = None
-
-        if not parameters:
-            print "Bailing out of saveMetadata because of 'not parameters'."
-            return None
-
-        try:
-            ps = DatafileParameterSet.objects.get(schema=schema,
-                                                  datafile=instance)
-            print "Parameter set already exists for %s, " \
-                "so we'll just return it." % instance.filename
-            return ps
-        except DatafileParameterSet.DoesNotExist:
-            ps = DatafileParameterSet(schema=schema,
-                                      datafile=instance)
-            ps.save()
-
-        for p in parameters:
-            print p.name
-            if p.name in metadata:
-                dfp = DatafileParameter(parameterset=ps,
-                                        name=p)
-                if p.isNumeric():
-                    if metadata[p.name] != '':
-                        dfp.numerical_value = metadata[p.name]
-                        dfp.save()
-                else:
-                    print p.name
-                    if isinstance(metadata[p.name], list):
-                        for val in reversed(metadata[p.name]):
-                            strip_val = val.strip()
-                            if strip_val:
-                                if strip_val not in exclude_line:
-                                    dfp = DatafileParameter(parameterset=ps,
-                                                            name=p)
-                                    dfp.string_value = strip_val
-                                    dfp.save()
-                    else:
-                        dfp.string_value = metadata[p.name]
-                        dfp.save()
-
-        return ps
-
-    def getParameters(self, schema, metadata):
-        """Return a list of the paramaters that will be saved.
-        """
-        param_objects = ParameterName.objects.filter(schema=schema)
-        parameters = []
-        for p in metadata:
-
-            if self.tagsToFind and p not in self.tagsToFind:
-                continue
-
-            if p in self.tagsToExclude:
-                continue
-
-            parameter = filter(lambda x: x.name == p, param_objects)
-
-            if parameter:
-                parameters.append(parameter[0])
-                continue
-
-            # detect type of parameter
-            datatype = ParameterName.STRING
-
-            # Int test
-            try:
-                int(metadata[p])
-            except ValueError:
-                pass
-            except TypeError:
-                pass
-            else:
-                datatype = ParameterName.NUMERIC
-
-            # Fraction test
-            if isinstance(metadata[p], Fraction):
-                datatype = ParameterName.NUMERIC
-
-            # Float test
-            try:
-                float(metadata[p])
-            except ValueError:
-                pass
-            except TypeError:
-                pass
-            else:
-                datatype = ParameterName.NUMERIC
-
-        return parameters
-
-    def getSchema(self):
-        """Return the schema object that the paramaterset will use.
-        """
-        try:
-            return Schema.objects.get(namespace__exact=self.schema)
-        except Schema.DoesNotExist:
-            schema = Schema(namespace=self.schema, name=self.name,
-                            type=Schema.DATAFILE)
-            schema.save()
-            return schema
-
-    def exec_command(self, cmdline):
-        """execute command on shell
-        """
-        p = subprocess.Popen(
-            cmdline,
-            stdout=subprocess.PIPE,
-            shell=True)
-
-        p.wait()
-
-        result_str = p.stdout.read()
-
-        return result_str
-
-    def bfconvert(self, bfconvert_path, inputfilename, outputfilename):
-        """
-        Run Bioformats bfconvert on an image file.
-        """
-        cmdline = "'%s' -series 0 -timepoint 0 -channel 0 -z 0 " \
-            "'%s' '%s' -overwrite" %\
-            (bfconvert_path, inputfilename, outputfilename)
-        print cmdline
-        logger.info(cmdline)
-
-        return self.exec_command(cmdline)
-
-    def stretch_contrast(self, convert_path, inputfilename, outputfilename):
-        """
-        Run ImageMagick convert with contrast-stretch on an image file.
-        """
-        cmdline = "'%s' '%s' -contrast-stretch 0 '%s'" %\
-            (command, inputfilename, outputfilename)
-        print cmdline
-        logger.info(cmdline)
-
-        return self.exec_command(cmdline)
-
-    def showinf(self, showinf_path, inputfilename):
-        """
-        Run Bioformats showinf to extract metadata.
-        """
-        cmdline = "'%s' '%s' -nopix" % (showinf_path, inputfilename)
-        print cmdline
-        logger.info(cmdline)
-
-        return self.exec_command(cmdline)
-
-
-def make_filter(name='', schema='', tagsToFind=[], tagsToExclude=[]):
+def make_filter(name='', schema=''):
     if not name:
         raise ValueError("BioformatsImageFilter "
                          "requires a name to be specified")
     if not schema:
         raise ValueError("BioformatsImageFilter "
                          "requires a schema to be specified")
-    return BioformatsImageFilter(name, schema, tagsToFind, tagsToExclude)
+    return BioformatsImageFilter(name, schema)
 
 make_filter.__doc__ = BioformatsImageFilter.__doc__
