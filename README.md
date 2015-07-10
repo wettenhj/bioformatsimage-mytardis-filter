@@ -49,6 +49,20 @@ POST_SAVE_FILTERS = [
    ]
 ```
 
+If you want to specify the name of the Celery queue the Bioformats processes
+should run in (e.g. "filters"), you can do so as follows:
+
+```
+POST_SAVE_FILTERS = [
+   ("tardis.tardis_portal.filters.bioformatsimage.bioformatsimage.make_filter",
+   ["BIOFORMATS", "http://tardis.edu.au/schemas/bioformats/1",
+    "/path/to/bftools/bfconvert",
+     "/path/to/bftools/showinf"]),
+   {'queue': 'filters'}
+   ],
+```
+
+
 Where the bftools directory is correct for your installation.
 
 `cd /path/to/mytardis` and load the parameter schema into the MyTardis database:
