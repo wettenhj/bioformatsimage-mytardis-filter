@@ -46,7 +46,6 @@ from tardis.tardis_portal.models import ParameterName, DatafileParameter
 from tardis.tardis_portal.models import DataFileObject
 import subprocess
 import tempfile
-import base64
 import os
 import shutil
 import traceback
@@ -288,14 +287,6 @@ class BioformatsImageFilter(object):
                             type=Schema.DATAFILE)
             schema.save()
             return schema
-
-    def base64_encode_file(self, filename):
-        """encode file from filename in base64
-        """
-        with open(filename, 'r') as fileobj:
-            read = fileobj.read()
-            encoded = base64.b64encode(read)
-            return encoded
 
     def exec_command(self, cmdline):
         """execute command on shell
