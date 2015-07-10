@@ -39,10 +39,11 @@ bioformatsimage.py
 import logging
 
 from django.conf import settings
+from django.core.cache import get_cache
 
 from tardis.tardis_portal.models import Schema, DatafileParameterSet
 from tardis.tardis_portal.models import ParameterName, DatafileParameter
-from tardis.tardis_portal.models import DataFileObject
+from tardis.tardis_portal.models import DataFile, DataFileObject
 import subprocess
 import os
 import traceback
@@ -67,7 +68,7 @@ def run_bfconvert(bfconvert_path, inputfilename, outputfilename,
     # bfconvert operates on each datafile at a time.
     lock_id = 'bioformats-filter-bfconvert-lock-%d' % df_id
 
-    def acquire_lock(): cache.add(lock_id, 'true', LOCK_EXPIRE)
+    def acquire_lock(): return cache.add(lock_id, 'true', LOCK_EXPIRE)
 
     def release_lock(): cache.delete(lock_id)
 
@@ -137,18 +138,20 @@ def run_showinf(showinf_path, inputfilename, df_id, schema_id):
     # showinf operates on each datafile at a time.
     lock_id = 'bioformats-filter-showinf-lock-%d' % df_id
 
-    def acquire_lock(): cache.add(lock_id, 'true', LOCK_EXPIRE)
+    def acquire_lock(): return cache.add(lock_id, 'true', LOCK_EXPIRE)
 
     def release_lock(): cache.delete(lock_id)
 
+    logger.debug("Attempting to acquire lock for showinf...")
     if acquire_lock():
+        logger.debug("Lock acquired for showinf")
         try:
             cmdline = "'%s' '%s' -nopix" % (showinf_path, inputfilename)
             logger.info(cmdline)
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
-            image_info = p.communicate()
-            image_info_list = image_info.split('\n')[11:]
+            stdout, _ = p.communicate()
+            image_info_list = stdout.split('\n')[11:]
 
             # Some/all? of these excludes below are specific to DM3 format:
             exclude_line = dict()
@@ -167,8 +170,9 @@ def run_showinf(showinf_path, inputfilename, df_id, schema_id):
                 ps = DatafileParameterSet.objects.get(schema__id=schema_id,
                                                       datafile__id=df_id)
             except DatafileParameterSet.DoesNotExist:
-                ps = DatafileParameterSet(schema__id=schema_id,
-                                          datafile__id=df_id)
+                schema = Schema.objects.get(id=schema_id)
+                datafile = DataFile.objects.get(id=df_id)
+                ps = DatafileParameterSet(schema=schema, datafile=datafile)
                 ps.save()
 
             param_name = ParameterName.objects.get(schema__id=schema_id,
