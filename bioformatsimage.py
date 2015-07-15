@@ -79,7 +79,7 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
             preview_image_rel_file_path = os.path.join(
                 os.path.dirname(urlparse.urlparse(dfo.uri).path),
                 str(df_id),
-                '%s.%s' % (os.path.basename(filepath),
+                '%s.%s' % (os.path.basename(inputfilename),
                            outputextension))
             preview_image_file_path = os.path.join(
                 settings.METADATA_STORE_PATH, preview_image_rel_file_path)
