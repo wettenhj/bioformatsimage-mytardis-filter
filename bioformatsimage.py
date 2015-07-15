@@ -91,7 +91,7 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
             # Extract only the first image from the stack:
             cmdline = "'%s' -series 0 -timepoint 0 -channel 0 -z 0 " \
                 "'%s' '%s' -overwrite" %\
-                (bfconvert_path, inputfilename, outputfilename)
+                (bfconvert_path, inputfilename, preview_image_file_path)
             logger.info(cmdline)
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
@@ -99,7 +99,8 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
             if p.returncode != 0:
                 logger.error(stdout)
                 return
-            os.rename(outputfilename, outputfilename + '.bioformats')
+            os.rename(preview_image_file_path,
+                      preview_image_file_path + '.bioformats')
 
             self.stretch_contrast('/usr/bin/convert',
                                   preview_image_file_path + '.bioformats',
@@ -107,7 +108,7 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
             # Run ImageMagick convert with contrast-stretch on an image file.
             # We could probably do this with the Wand Python module instead.
             cmdline = "convert '%s.bioformats' -contrast-stretch 0 '%s'" %\
-                (command, outputfilename, outputfilename)
+                (command, preview_image_file_path, preview_image_file_path)
             logger.info(cmdline)
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
