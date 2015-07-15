@@ -96,7 +96,10 @@ def run_bfconvert(bfconvert_path, inputfilename, outputfilename,
             logger.info(cmdline)
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
-            p.communicate()
+            stdout, _ = p.communicate()
+            if p.returncode != 0:
+                logger.error(stdout)
+                return
             os.rename(outputfilename, outputfilename + '.bioformats')
 
             self.stretch_contrast('/usr/bin/convert',
@@ -109,8 +112,11 @@ def run_bfconvert(bfconvert_path, inputfilename, outputfilename,
             logger.info(cmdline)
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
-            p.communicate()
+            stdout, _ = p.communicate()
             os.unlink(preview_image_file_path + '.bioformats')
+            if p.returncode != 0:
+                logger.error(stdout)
+                return
             try:
                 ps = DatafileParameterSet.objects.get(schema__id=schema_id,
                                                       datafile__id=df_id)
@@ -151,6 +157,9 @@ def run_showinf(showinf_path, inputfilename, df_id, schema_id):
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
             stdout, _ = p.communicate()
+            if p.returncode != 0:
+                logger.error(stdout)
+                return
             image_info_list = stdout.split('\n')[11:]
 
             # Some/all? of these excludes below are specific to DM3 format:
