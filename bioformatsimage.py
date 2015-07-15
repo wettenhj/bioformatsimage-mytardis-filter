@@ -57,8 +57,7 @@ LOCK_EXPIRE = 60 * 5  # Lock expires in 5 minutes
 
 @task(name="tardis_portal.filters.bioformatsimage.bfconvert",
       ignore_result=True)
-def run_bfconvert(bfconvert_path, inputfilename, outputfilename,
-                  df_id, schema_id):
+def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
     """
     Run Bioformats bfconvert on an image file.
     """
@@ -268,7 +267,6 @@ class BioformatsImageFilter(object):
                 kwargs = {'queue': self.queue} if self.queue else {}
                 run_bfconvert.apply_async(args=[self.bfconvert_path,
                                                 filepath,
-                                                preview_image_file_path,
                                                 instance.id,
                                                 schema.id],
                                           **kwargs)
