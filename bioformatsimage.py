@@ -102,13 +102,10 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
             os.rename(preview_image_file_path,
                       preview_image_file_path + '.bioformats')
 
-            self.stretch_contrast('/usr/bin/convert',
-                                  preview_image_file_path + '.bioformats',
-                                  preview_image_file_path)
             # Run ImageMagick convert with contrast-stretch on an image file.
             # We could probably do this with the Wand Python module instead.
             cmdline = "convert '%s.bioformats' -contrast-stretch 0 '%s'" %\
-                (command, preview_image_file_path, preview_image_file_path)
+                (preview_image_file_path, preview_image_file_path)
             logger.info(cmdline)
             p = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, shell=True)
@@ -121,7 +118,7 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
                 ps = DatafileParameterSet.objects.get(schema__id=schema_id,
                                                       datafile__id=df_id)
             except DatafileParameterSet.DoesNotExist:
-                ps = DatafileParameterSet(schema=schema,
+                ps = DatafileParameterSet(schema__id=schema_id,
                                           datafile=instance)
                 ps.save()
             param_name = ParameterName.objects.get(schema__id=schema_id,
