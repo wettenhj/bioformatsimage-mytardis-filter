@@ -118,8 +118,10 @@ def run_bfconvert(bfconvert_path, inputfilename, df_id, schema_id):
                 ps = DatafileParameterSet.objects.get(schema__id=schema_id,
                                                       datafile__id=df_id)
             except DatafileParameterSet.DoesNotExist:
-                ps = DatafileParameterSet(schema__id=schema_id,
-                                          datafile=instance)
+                schema = Schema.objects.get(id=schema_id)
+                datafile = DataFile.objects.get(id=df_id)
+                ps = DatafileParameterSet(schema=schema,
+                                          datafile=datafile)
                 ps.save()
             param_name = ParameterName.objects.get(schema__id=schema_id,
                                                    name='previewImage')
