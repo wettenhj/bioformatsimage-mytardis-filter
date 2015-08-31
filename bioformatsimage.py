@@ -263,6 +263,14 @@ class BioformatsImageFilter(object):
         # MyTardis's iiif.py can generate a preview image for these file(s):
         generate_preview_image = extension not in ('tif')
 
+        one_gigabyte = 1024 * 1024 * 1024
+        if instance.file_object.size > one_gigabyte:
+            logger.warning("Refusing to run Bioformats on %s (ID %d), "
+                           "because its size (%d) is larger than 1 GB."
+                           % (instance.filename, instance.id,
+                              instance.file_object.size))
+            return None
+
         if DatafileParameterSet.objects.filter(schema=schema,
                                                datafile=instance).exists():
             ps = DatafileParameterSet.objects.get(schema=schema,
