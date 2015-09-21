@@ -169,10 +169,10 @@ def run_showinf(showinf_path, inputfilename, df_id, schema_id):
             ps = DatafileParameterSet.objects.filter(schema=schema,
                                                      datafile=datafile).first()
             if ps:
-                file_param = ParameterName.objects.get(schema__id=schema_id,
-                                                       name='file')
+                info_param = ParameterName.objects.get(schema__id=schema_id,
+                                                       name='image_information')
                 if DatafileParameter.objects.filter(parameterset=ps,
-                                                    name=file_param).exists():
+                                                    name=info_param).exists():
                     logger.info("Metadata already exists for df_id %d"
                                 % df_id)
                     return
